@@ -1,0 +1,107 @@
+version: "3.9"
+
+services:
+
+  # ---------------------------------------------------------------------------
+  # FalkorDB - graph database backend for Zep/Graphiti
+  # ---------------------------------------------------------------------------
+  falkordb:
+    image: falkordb/falkordb:latest
+    restart: unless-stopped
+    volumes:
+      - falkordb_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "-p", "6379", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ---------------------------------------------------------------------------
+  # Zep - temporal knowledge graph memory layer
+  # ---------------------------------------------------------------------------
+  zep:
+    image: ghcr.io/getzep/zep:latest
+    restart: unless-stopped
+    depends_on:
+      falkordb:
+        condition: service_healthy
+    ports:
+      - "8010:8000"
+    environment:
+      ZEP_STORE_TYPE: falkordb
+      ZEP_FALKORDB_URL: redis://falkordb:6379
+      ZEP_OPENAI_API_KEY: ${OPENAI_API_KEY}
+      ZEP_AUTH_SECRET: ${ZEP_API_KEY}
+      ZEP_AUTH_REQUIRED: "true"
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8000/healthz"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+
+  # ---------------------------------------------------------------------------
+  # Qdrant - vector store for raw document chunks (Notion, email bodies)
+  # ---------------------------------------------------------------------------
+  qdrant:
+    image: qdrant/qdrant:latest
+    restart: unless-stopped
+    ports:
+      - "6333:6333"
+    volumes:
+      - qdrant_data:/qdrant/storage
+    environment:
+      QDRANT__SERVICE__API_KEY: ${QDRANT_API_KEY}
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:6333/healthz"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ---------------------------------------------------------------------------
+  # Ingestion service - webhook receiver + pull scheduler
+  # ---------------------------------------------------------------------------
+  ingestion:
+    build:
+      context: ./ingestion
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    depends_on:
+      zep:
+        condition: service_healthy
+      qdrant:
+        condition: service_healthy
+    ports:
+      - "8000:8000"
+    volumes:
+      - digest_data:/data
+      - ingestion_db:/db
+    environment:
+      ZEP_URL: http://zep:8000
+      ZEP_API_KEY: ${ZEP_API_KEY}
+      QDRANT_URL: http://qdrant:6333
+      QDRANT_API_KEY: ${QDRANT_API_KEY}
+      OPENAI_API_KEY: ${OPENAI_API_KEY}
+      EMBEDDING_PROVIDER: ${EMBEDDING_PROVIDER:-openai}
+      BLUEBUBBLES_URL: ${BLUEBUBBLES_URL}
+      BLUEBUBBLES_PASSWORD: ${BLUEBUBBLES_PASSWORD}
+      BLUEBUBBLES_WEBHOOK_SECRET: ${BLUEBUBBLES_WEBHOOK_SECRET}
+      IMAP_HOST: ${IMAP_HOST}
+      IMAP_PORT: ${IMAP_PORT:-993}
+      IMAP_USER: ${IMAP_USER}
+      IMAP_PASSWORD: ${IMAP_PASSWORD}
+      IMAP_MAILBOX: ${IMAP_MAILBOX:-INBOX}
+      NOTION_API_KEY: ${NOTION_API_KEY}
+      NOTION_WEBHOOK_SECRET: ${NOTION_WEBHOOK_SECRET}
+      DEDUP_DB_PATH: /db/dedup.sqlite
+      DIGEST_PATH: /data/digest.txt
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8000/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  falkordb_data:
+  qdrant_data:
+  digest_data:
+  ingestion_db:

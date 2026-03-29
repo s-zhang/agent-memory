@@ -1,0 +1,14 @@
+# Railway / production overrides
+# Usage: docker-compose -f docker-compose.yml -f docker-compose.prod.yml up
+version: "3.9"
+
+services:
+  zep:
+    ports: []          # not exposed directly; Railway provides public URL
+
+  qdrant:
+    ports: []
+
+  ingestion:
+    ports:
+      - "8000:8000"    # Railway exposes this as the public webhook endpoint

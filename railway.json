@@ -1,0 +1,58 @@
+{
+  "$schema": "https://railway.app/railway.schema.json",
+  "build": {
+    "builder": "DOCKERFILE"
+  },
+  "services": {
+    "falkordb": {
+      "image": "falkordb/falkordb:latest",
+      "volumes": [{ "mount": "/data", "name": "falkordb_data" }]
+    },
+    "zep": {
+      "image": "ghcr.io/getzep/zep:latest",
+      "dependsOn": ["falkordb"],
+      "variables": {
+        "ZEP_STORE_TYPE": "falkordb",
+        "ZEP_FALKORDB_URL": "redis://${{falkordb.RAILWAY_PRIVATE_DOMAIN}}:6379",
+        "ZEP_OPENAI_API_KEY": "${{shared.OPENAI_API_KEY}}",
+        "ZEP_AUTH_SECRET": "${{shared.ZEP_API_KEY}}",
+        "ZEP_AUTH_REQUIRED": "true"
+      }
+    },
+    "qdrant": {
+      "image": "qdrant/qdrant:latest",
+      "volumes": [{ "mount": "/qdrant/storage", "name": "qdrant_data" }],
+      "variables": {
+        "QDRANT__SERVICE__API_KEY": "${{shared.QDRANT_API_KEY}}"
+      }
+    },
+    "ingestion": {
+      "source": { "repo": ".", "buildContext": "ingestion" },
+      "dependsOn": ["zep", "qdrant"],
+      "volumes": [
+        { "mount": "/data", "name": "digest_data" },
+        { "mount": "/db", "name": "ingestion_db" }
+      ],
+      "variables": {
+        "ZEP_URL": "http://${{zep.RAILWAY_PRIVATE_DOMAIN}}:8000",
+        "ZEP_API_KEY": "${{shared.ZEP_API_KEY}}",
+        "QDRANT_URL": "http://${{qdrant.RAILWAY_PRIVATE_DOMAIN}}:6333",
+        "QDRANT_API_KEY": "${{shared.QDRANT_API_KEY}}",
+        "OPENAI_API_KEY": "${{shared.OPENAI_API_KEY}}",
+        "EMBEDDING_PROVIDER": "openai",
+        "BLUEBUBBLES_URL": "${{shared.BLUEBUBBLES_URL}}",
+        "BLUEBUBBLES_PASSWORD": "${{shared.BLUEBUBBLES_PASSWORD}}",
+        "BLUEBUBBLES_WEBHOOK_SECRET": "${{shared.BLUEBUBBLES_WEBHOOK_SECRET}}",
+        "IMAP_HOST": "${{shared.IMAP_HOST}}",
+        "IMAP_PORT": "993",
+        "IMAP_USER": "${{shared.IMAP_USER}}",
+        "IMAP_PASSWORD": "${{shared.IMAP_PASSWORD}}",
+        "IMAP_MAILBOX": "INBOX",
+        "NOTION_API_KEY": "${{shared.NOTION_API_KEY}}",
+        "NOTION_WEBHOOK_SECRET": "${{shared.NOTION_WEBHOOK_SECRET}}",
+        "DEDUP_DB_PATH": "/db/dedup.sqlite",
+        "DIGEST_PATH": "/data/digest.txt"
+      }
+    }
+  }
+}
