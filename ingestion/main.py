@@ -87,21 +87,42 @@ if BASE_URL:
     BASE_URL = f"https://{BASE_URL}"
 
 
-@app.get("/.well-known/oauth-authorization-server")
-async def oauth_metadata():
-    """
-    RFC 8414 OAuth Authorization Server Metadata.
-    Required by MCP SDK when discovering auth for HTTP servers.
-    We use static bearer tokens, so this returns minimal metadata
-    pointing clients to use pre-issued tokens directly.
-    """
+def _oauth_metadata_response() -> dict:
     issuer = BASE_URL or "https://agent-memory-production-cf12.up.railway.app"
-    return JSONResponse({
+    return {
         "issuer": issuer,
         "token_endpoint": f"{issuer}/token",
         "response_types_supported": ["token"],
         "grant_types_supported": ["urn:ietf:params:oauth:grant-type:token-exchange"],
+    }
+
+
+@app.get("/.well-known/oauth-authorization-server")
+@app.get("/.well-known/oauth-authorization-server/{path:path}")
+async def oauth_metadata():
+    return JSONResponse(_oauth_metadata_response())
+
+
+@app.get("/.well-known/oauth-protected-resource")
+@app.get("/.well-known/oauth-protected-resource/{path:path}")
+async def oauth_protected_resource():
+    issuer = BASE_URL or "https://agent-memory-production-cf12.up.railway.app"
+    return JSONResponse({
+        "resource": f"{issuer}/mcp",
+        "authorization_servers": [issuer],
+        "bearer_methods_supported": ["header"],
     })
+
+
+@app.get("/.well-known/openid-configuration")
+@app.get("/.well-known/openid-configuration/{path:path}")
+async def openid_configuration():
+    return JSONResponse(_oauth_metadata_response())
+
+
+@app.post("/register")
+async def dynamic_client_registration():
+    return JSONResponse({"error": "invalid_client_metadata"}, status_code=400)
 
 
 async def _mcp_asgi(scope, receive, send):
