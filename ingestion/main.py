@@ -90,7 +90,7 @@ async def mcp_sse(request: Request):
 
 @app.post("/mcp/messages/")
 async def mcp_messages(request: Request):
-    _verify_mcp_key(request)
+    # No auth check here — session_id is minted by an already-authenticated SSE handshake
     await sse.handle_post_message(request.scope, request.receive, request._send)
 
 
