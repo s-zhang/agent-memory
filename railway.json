@@ -51,7 +51,8 @@
         "NOTION_API_KEY": "${{shared.NOTION_API_KEY}}",
         "NOTION_WEBHOOK_SECRET": "${{shared.NOTION_WEBHOOK_SECRET}}",
         "DEDUP_DB_PATH": "/db/dedup.sqlite",
-        "DIGEST_PATH": "/data/digest.txt"
+        "DIGEST_PATH": "/data/digest.txt",
+        "MCP_API_KEY": "${{shared.MCP_API_KEY}}"
       }
     }
   }

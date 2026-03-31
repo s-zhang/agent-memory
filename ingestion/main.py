@@ -10,6 +10,7 @@ import os
 from contextlib import asynccontextmanager
 
 from fastapi import BackgroundTasks, FastAPI, HTTPException, Request, Response
+from fastapi.responses import JSONResponse
 from mcp.server.streamable_http_manager import StreamableHTTPSessionManager
 from pydantic import BaseModel
 
@@ -81,12 +82,41 @@ async def health():
     return {"status": "ok"}
 
 
+BASE_URL = os.environ.get("RAILWAY_PUBLIC_DOMAIN", "")
+if BASE_URL:
+    BASE_URL = f"https://{BASE_URL}"
+
+
+@app.get("/.well-known/oauth-authorization-server")
+async def oauth_metadata():
+    """
+    RFC 8414 OAuth Authorization Server Metadata.
+    Required by MCP SDK when discovering auth for HTTP servers.
+    We use static bearer tokens, so this returns minimal metadata
+    pointing clients to use pre-issued tokens directly.
+    """
+    issuer = BASE_URL or "https://agent-memory-production-cf12.up.railway.app"
+    return JSONResponse({
+        "issuer": issuer,
+        "token_endpoint": f"{issuer}/token",
+        "response_types_supported": ["token"],
+        "grant_types_supported": ["urn:ietf:params:oauth:grant-type:token-exchange"],
+    })
+
+
 async def _mcp_asgi(scope, receive, send):
     if MCP_API_KEY:
         headers = dict(scope.get("headers", []))
         auth = headers.get(b"authorization", b"").decode()
         if auth != f"Bearer {MCP_API_KEY}":
-            response = Response("Unauthorized", status_code=401)
+            response = Response(
+                content='{"error":"unauthorized","error_description":"Invalid or missing bearer token"}',
+                status_code=401,
+                headers={
+                    "WWW-Authenticate": "Bearer",
+                    "Content-Type": "application/json",
+                },
+            )
             await response(scope, receive, send)
             return
     await mcp_manager.handle_request(scope, receive, send)
