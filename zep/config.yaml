@@ -1,0 +1,29 @@
+llm:
+  service: openai
+  model: gpt-3.5-turbo
+
+extractors:
+  documents:
+    embeddings:
+      enabled: true
+      service: openai
+      dimensions: 1536
+  messages:
+    embeddings:
+      enabled: true
+      service: openai
+      dimensions: 1536
+    summarizer:
+      embeddings:
+        enabled: true
+        service: openai
+        dimensions: 1536
+
+store:
+  type: postgres
+  postgres:
+    dsn: ""
+
+server:
+  host: "0.0.0.0"
+  port: 8000
