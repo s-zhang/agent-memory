@@ -6,15 +6,13 @@ Ingestion service entry point.
 """
 import asyncio
 import logging
+import os
 from contextlib import asynccontextmanager
 
-import os
-
+import anyio
 from fastapi import BackgroundTasks, FastAPI, HTTPException, Request, Response
-from mcp.server.sse import SseServerTransport
+from mcp.server.streamable_http_manager import StreamableHTTPSessionManager
 from pydantic import BaseModel
-
-MCP_API_KEY = os.environ.get("MCP_API_KEY", "")
 
 import mcp_server as mcp_module
 from connectors import bluebubbles, email_imap, notion
@@ -30,15 +28,21 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+MCP_API_KEY = os.environ.get("MCP_API_KEY", "")
+
+mcp_manager = StreamableHTTPSessionManager(
+    app=mcp_module.server,
+    event_store=None,
+    stateless=True,
+)
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Startup
     logger.info("Ingestion service starting up")
 
     await ensure_collection()
 
-    # Initial bulk pull (runs in background to not block startup)
     async def initial_pull():
         logger.info("Running initial bulk pull")
         await asyncio.gather(
@@ -55,15 +59,24 @@ async def lifespan(app: FastAPI):
     scheduler.start()
     logger.info("Scheduler started")
 
-    yield
+    async with anyio.create_task_group() as tg:
+        tg.start_soon(mcp_manager.run)
+        yield
+        tg.cancel_scope.cancel()
 
-    # Shutdown
     scheduler.shutdown(wait=False)
     logger.info("Ingestion service shut down")
 
 
 app = FastAPI(title="Memory Ingestion Service", lifespan=lifespan)
-sse = SseServerTransport("/mcp/messages/")
+
+
+def _verify_mcp_key(request: Request) -> None:
+    if not MCP_API_KEY:
+        return
+    auth = request.headers.get("Authorization", "")
+    if auth != f"Bearer {MCP_API_KEY}":
+        raise HTTPException(status_code=401, detail="Unauthorized")
 
 
 @app.get("/health")
@@ -71,27 +84,10 @@ async def health():
     return {"status": "ok"}
 
 
-def _verify_mcp_key(request: Request) -> None:
-    if not MCP_API_KEY:
-        return  # not configured — allow (dev mode)
-    auth = request.headers.get("Authorization", "")
-    if auth != f"Bearer {MCP_API_KEY}":
-        raise HTTPException(status_code=401, detail="Unauthorized")
-
-
-@app.get("/mcp/sse")
-async def mcp_sse(request: Request):
+@app.route("/mcp", methods=["GET", "POST", "DELETE"])
+async def mcp_endpoint(request: Request):
     _verify_mcp_key(request)
-    async with sse.connect_sse(request.scope, request.receive, request._send) as streams:
-        await mcp_module.server.run(
-            streams[0], streams[1], mcp_module.server.create_initialization_options()
-        )
-
-
-@app.post("/mcp/messages/")
-async def mcp_messages(request: Request):
-    # No auth check here — session_id is minted by an already-authenticated SSE handshake
-    await sse.handle_post_message(request.scope, request.receive, request._send)
+    await mcp_manager.handle_request(request.scope, request.receive, request._send)
 
 
 @app.post("/webhooks/notion")
@@ -99,7 +95,6 @@ async def webhook_notion(request: Request, background_tasks: BackgroundTasks):
     body = await request.body()
     await notion_webhook.verify_signature(request, body)
     payload = await request.json()
-    # ACK immediately, process in background
     background_tasks.add_task(notion_webhook.handle, payload)
     return Response(status_code=200)
 
