@@ -125,6 +125,43 @@ async def upsert_document(
     logger.debug("Upserted %d chunks for %s/%s", len(points), source, source_id)
 
 
+async def search_docs(
+    query: str,
+    limit: int = 5,
+    source_filter: list[str] | None = None,
+) -> list[dict]:
+    """Embed query and search Qdrant."""
+    from qdrant_client.models import FieldCondition, Filter, MatchAny
+
+    await ensure_collection()
+    embeddings = await _embed([query])
+    vector = embeddings[0]
+
+    qdrant_filter = None
+    if source_filter:
+        qdrant_filter = Filter(
+            must=[FieldCondition(key="source", match=MatchAny(any=source_filter))]
+        )
+
+    results = await _get_qdrant().search(
+        collection_name=config.QDRANT_COLLECTION,
+        query_vector=vector,
+        limit=limit,
+        query_filter=qdrant_filter,
+        with_payload=True,
+    )
+    return [
+        {
+            "text": r.payload.get("text", ""),
+            "title": r.payload.get("title", ""),
+            "source": r.payload.get("source", ""),
+            "url": r.payload.get("url", ""),
+            "score": round(r.score, 3),
+        }
+        for r in results
+    ]
+
+
 async def delete_document(*, source: str, source_id: str) -> None:
     """Delete all chunks for a given source document."""
     client = _get_qdrant()

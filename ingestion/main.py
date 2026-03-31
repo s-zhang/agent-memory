@@ -9,11 +9,13 @@ import logging
 from contextlib import asynccontextmanager
 
 from fastapi import BackgroundTasks, FastAPI, Request, Response
+from pydantic import BaseModel
 
 from connectors import bluebubbles, email_imap, notion
 from scheduler import create_scheduler
 from webhooks import bluebubbles as bb_webhook
 from webhooks import notion as notion_webhook
+from writers import qdrant_writer
 from writers.qdrant_writer import ensure_collection
 
 logging.basicConfig(
@@ -70,6 +72,22 @@ async def webhook_notion(request: Request, background_tasks: BackgroundTasks):
     # ACK immediately, process in background
     background_tasks.add_task(notion_webhook.handle, payload)
     return Response(status_code=200)
+
+
+class SearchRequest(BaseModel):
+    query: str
+    limit: int = 5
+    sources: list[str] | None = None
+
+
+@app.post("/search")
+async def search(req: SearchRequest):
+    results = await qdrant_writer.search_docs(
+        query=req.query,
+        limit=req.limit,
+        source_filter=req.sources,
+    )
+    return {"results": results}
 
 
 @app.post("/webhooks/bluebubbles")
