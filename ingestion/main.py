@@ -91,9 +91,11 @@ def _oauth_metadata_response() -> dict:
     issuer = BASE_URL or "https://agent-memory-production-cf12.up.railway.app"
     return {
         "issuer": issuer,
+        "authorization_endpoint": f"{issuer}/authorize",
         "token_endpoint": f"{issuer}/token",
-        "response_types_supported": ["token"],
-        "grant_types_supported": ["urn:ietf:params:oauth:grant-type:token-exchange"],
+        "response_types_supported": ["code", "token"],
+        "grant_types_supported": ["authorization_code", "urn:ietf:params:oauth:grant-type:token-exchange"],
+        "code_challenge_methods_supported": ["S256"],
     }
 
 
