@@ -9,7 +9,6 @@ import logging
 import os
 from contextlib import asynccontextmanager
 
-import anyio
 from fastapi import BackgroundTasks, FastAPI, HTTPException, Request, Response
 from mcp.server.streamable_http_manager import StreamableHTTPSessionManager
 from pydantic import BaseModel
@@ -59,10 +58,8 @@ async def lifespan(app: FastAPI):
     scheduler.start()
     logger.info("Scheduler started")
 
-    async with anyio.create_task_group() as tg:
-        tg.start_soon(mcp_manager.run)
+    async with mcp_manager.run():
         yield
-        tg.cancel_scope.cancel()
 
     scheduler.shutdown(wait=False)
     logger.info("Ingestion service shut down")
