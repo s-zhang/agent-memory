@@ -8,9 +8,13 @@ import asyncio
 import logging
 from contextlib import asynccontextmanager
 
-from fastapi import BackgroundTasks, FastAPI, Request, Response
+import os
+
+from fastapi import BackgroundTasks, FastAPI, HTTPException, Request, Response
 from mcp.server.sse import SseServerTransport
 from pydantic import BaseModel
+
+MCP_API_KEY = os.environ.get("MCP_API_KEY", "")
 
 import mcp_server as mcp_module
 from connectors import bluebubbles, email_imap, notion
@@ -67,8 +71,17 @@ async def health():
     return {"status": "ok"}
 
 
+def _verify_mcp_key(request: Request) -> None:
+    if not MCP_API_KEY:
+        return  # not configured — allow (dev mode)
+    auth = request.headers.get("Authorization", "")
+    if auth != f"Bearer {MCP_API_KEY}":
+        raise HTTPException(status_code=401, detail="Unauthorized")
+
+
 @app.get("/mcp/sse")
 async def mcp_sse(request: Request):
+    _verify_mcp_key(request)
     async with sse.connect_sse(request.scope, request.receive, request._send) as streams:
         await mcp_module.server.run(
             streams[0], streams[1], mcp_module.server.create_initialization_options()
@@ -77,6 +90,7 @@ async def mcp_sse(request: Request):
 
 @app.post("/mcp/messages/")
 async def mcp_messages(request: Request):
+    _verify_mcp_key(request)
     await sse.handle_post_message(request.scope, request.receive, request._send)
 
 
