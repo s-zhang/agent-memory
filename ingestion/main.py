@@ -9,8 +9,10 @@ import logging
 from contextlib import asynccontextmanager
 
 from fastapi import BackgroundTasks, FastAPI, Request, Response
+from mcp.server.sse import SseServerTransport
 from pydantic import BaseModel
 
+import mcp_server as mcp_module
 from connectors import bluebubbles, email_imap, notion
 from scheduler import create_scheduler
 from webhooks import bluebubbles as bb_webhook
@@ -57,11 +59,25 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title="Memory Ingestion Service", lifespan=lifespan)
+sse = SseServerTransport("/mcp/messages/")
 
 
 @app.get("/health")
 async def health():
     return {"status": "ok"}
+
+
+@app.get("/mcp/sse")
+async def mcp_sse(request: Request):
+    async with sse.connect_sse(request.scope, request.receive, request._send) as streams:
+        await mcp_module.server.run(
+            streams[0], streams[1], mcp_module.server.create_initialization_options()
+        )
+
+
+@app.post("/mcp/messages/")
+async def mcp_messages(request: Request):
+    await sse.handle_post_message(request.scope, request.receive, request._send)
 
 
 @app.post("/webhooks/notion")
