@@ -81,10 +81,18 @@ async def health():
     return {"status": "ok"}
 
 
-@app.route("/mcp", methods=["GET", "POST", "DELETE"])
-async def mcp_endpoint(request: Request):
-    _verify_mcp_key(request)
-    await mcp_manager.handle_request(request.scope, request.receive, request._send)
+async def _mcp_asgi(scope, receive, send):
+    if MCP_API_KEY:
+        headers = dict(scope.get("headers", []))
+        auth = headers.get(b"authorization", b"").decode()
+        if auth != f"Bearer {MCP_API_KEY}":
+            response = Response("Unauthorized", status_code=401)
+            await response(scope, receive, send)
+            return
+    await mcp_manager.handle_request(scope, receive, send)
+
+
+app.mount("/mcp", _mcp_asgi)
 
 
 @app.post("/webhooks/notion")
