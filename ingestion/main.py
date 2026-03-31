@@ -10,7 +10,6 @@ import os
 from contextlib import asynccontextmanager
 
 from fastapi import BackgroundTasks, FastAPI, HTTPException, Request, Response
-from fastapi.responses import JSONResponse
 from mcp.server.streamable_http_manager import StreamableHTTPSessionManager
 from pydantic import BaseModel
 
@@ -81,50 +80,6 @@ def _verify_mcp_key(request: Request) -> None:
 async def health():
     return {"status": "ok"}
 
-
-BASE_URL = os.environ.get("RAILWAY_PUBLIC_DOMAIN", "")
-if BASE_URL:
-    BASE_URL = f"https://{BASE_URL}"
-
-
-def _oauth_metadata_response() -> dict:
-    issuer = BASE_URL or "https://agent-memory-production-cf12.up.railway.app"
-    return {
-        "issuer": issuer,
-        "authorization_endpoint": f"{issuer}/authorize",
-        "token_endpoint": f"{issuer}/token",
-        "response_types_supported": ["code", "token"],
-        "grant_types_supported": ["authorization_code", "urn:ietf:params:oauth:grant-type:token-exchange"],
-        "code_challenge_methods_supported": ["S256"],
-    }
-
-
-@app.get("/.well-known/oauth-authorization-server")
-@app.get("/.well-known/oauth-authorization-server/{path:path}")
-async def oauth_metadata():
-    return JSONResponse(_oauth_metadata_response())
-
-
-@app.get("/.well-known/oauth-protected-resource")
-@app.get("/.well-known/oauth-protected-resource/{path:path}")
-async def oauth_protected_resource():
-    issuer = BASE_URL or "https://agent-memory-production-cf12.up.railway.app"
-    return JSONResponse({
-        "resource": f"{issuer}/mcp",
-        "authorization_servers": [issuer],
-        "bearer_methods_supported": ["header"],
-    })
-
-
-@app.get("/.well-known/openid-configuration")
-@app.get("/.well-known/openid-configuration/{path:path}")
-async def openid_configuration():
-    return JSONResponse(_oauth_metadata_response())
-
-
-@app.post("/register")
-async def dynamic_client_registration():
-    return JSONResponse({"error": "invalid_client_metadata"}, status_code=400)
 
 
 async def _mcp_asgi(scope, receive, send):
