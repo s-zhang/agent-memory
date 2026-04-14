@@ -97,6 +97,22 @@ async def _mcp_asgi(scope, receive, send):
             )
             await response(scope, receive, send)
             return
+
+    # Health probes (plain GET without SSE Accept) should return 200, not 406.
+    # The MCP manager returns 406 for GETs lacking "Accept: text/event-stream",
+    # which causes the ECC health-check hook to mark this server unhealthy.
+    if scope.get("method") == "GET":
+        headers = dict(scope.get("headers", []))
+        accept = headers.get(b"accept", b"").decode()
+        if "text/event-stream" not in accept:
+            response = Response(
+                content='{"status":"ok"}',
+                status_code=200,
+                headers={"Content-Type": "application/json"},
+            )
+            await response(scope, receive, send)
+            return
+
     await mcp_manager.handle_request(scope, receive, send)
 
 
