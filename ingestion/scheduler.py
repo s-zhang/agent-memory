@@ -8,6 +8,7 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
 from apscheduler.triggers.interval import IntervalTrigger
 
+import config
 from connectors import bluebubbles, email_imap, notion
 from digest import build_digest
 
@@ -17,14 +18,15 @@ logger = logging.getLogger(__name__)
 def create_scheduler() -> AsyncIOScheduler:
     scheduler = AsyncIOScheduler()
 
-    # BlueBubbles: every 15 min (catch missed webhooks)
-    scheduler.add_job(
-        bluebubbles.pull_recent,
-        IntervalTrigger(minutes=15),
-        id="pull_bluebubbles",
-        replace_existing=True,
-        misfire_grace_time=60,
-    )
+    # BlueBubbles pull: only register when explicitly enabled (not on Railway)
+    if config.BLUEBUBBLES_PULL_ENABLED:
+        scheduler.add_job(
+            bluebubbles.pull_recent,
+            IntervalTrigger(minutes=15),
+            id="pull_bluebubbles",
+            replace_existing=True,
+            misfire_grace_time=60,
+        )
 
     # Email IMAP: every 15 min
     scheduler.add_job(

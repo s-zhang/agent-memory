@@ -1,6 +1,8 @@
 """
-BlueBubbles connector - pull recent iMessages via REST API.
-Feeds conversation turns into Zep (not Qdrant - raw message text, not documents).
+BlueBubbles connector.
+Webhook-driven: BlueBubbles pushes new-message events to the ingestion service.
+Pull-based polling is disabled by default (BLUEBUBBLES_PULL_ENABLED=false) because
+Railway cannot reach the local Mac running BlueBubbles.
 """
 import logging
 from datetime import datetime
@@ -9,12 +11,16 @@ import httpx
 
 import config
 import dedup
+from resolvers.contact_resolver import resolve_name
 from writers import zep_writer
 
 logger = logging.getLogger(__name__)
 
 BASE = config.BLUEBUBBLES_URL
 AUTH = {"password": config.BLUEBUBBLES_PASSWORD}
+
+# Log each unique handle address once so we can inspect the raw payload shape.
+_handles_logged: set[str] = set()
 
 
 async def _get_chats() -> list[dict]:
@@ -46,8 +52,20 @@ async def _ingest_message(msg: dict, chat_guid: str) -> None:
 
     is_from_me = msg.get("isFromMe", False)
     handle = msg.get("handle", {}) or {}
-    sender = "me" if is_from_me else (handle.get("address") or "contact")
-    role_type = "user" if is_from_me else "assistant"
+    address = handle.get("address", "")
+
+    # Log the raw handle once per address to help diagnose payload shape.
+    if address and address not in _handles_logged:
+        logger.info("BlueBubbles handle sample (address=%s): %s", address, handle)
+        _handles_logged.add(address)
+
+    if is_from_me:
+        sender = "me"
+    else:
+        sender = await resolve_name(address) if address else "unknown"
+
+    # Both sides are humans — role_type "user" is correct for Zep human-to-human threads.
+    role_type = "user"
 
     timestamp_ms = msg.get("dateCreated") or msg.get("date")
     timestamp = (
@@ -56,7 +74,7 @@ async def _ingest_message(msg: dict, chat_guid: str) -> None:
         else datetime.utcnow()
     )
 
-    # Use chat GUID as Zep session so all messages in a thread share context
+    # Use chat GUID as Zep session so all messages in a thread share context.
     session_id = f"imessage_{chat_guid.replace(':', '_').replace('+', '')}"
 
     await zep_writer.add_message_episode(
@@ -65,13 +83,17 @@ async def _ingest_message(msg: dict, chat_guid: str) -> None:
         role_type=role_type,
         content=text,
         timestamp=timestamp,
-        metadata={"source": "imessage", "chat_guid": chat_guid},
+        metadata={"source": "imessage", "chat_guid": chat_guid, "contact": sender},
     )
     dedup.mark_ingested("imessage", msg_id, h)
 
 
 async def pull_recent(messages_per_chat: int = 50) -> None:
-    """Pull recent messages from all chats. Called by scheduler."""
+    """Pull recent messages from all chats. Disabled on Railway (BLUEBUBBLES_PULL_ENABLED=false)."""
+    if not config.BLUEBUBBLES_PULL_ENABLED:
+        logger.info("BlueBubbles pull disabled — relying on webhooks only")
+        return
+
     logger.info("BlueBubbles: pulling recent messages")
     try:
         chats = await _get_chats()

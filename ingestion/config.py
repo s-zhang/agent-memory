@@ -18,6 +18,10 @@ EMBEDDING_DIM = 1536
 BLUEBUBBLES_URL = os.environ["BLUEBUBBLES_URL"]
 BLUEBUBBLES_PASSWORD = os.environ["BLUEBUBBLES_PASSWORD"]
 BLUEBUBBLES_WEBHOOK_SECRET = os.environ.get("BLUEBUBBLES_WEBHOOK_SECRET", "")
+BLUEBUBBLES_PULL_ENABLED = os.environ.get("BLUEBUBBLES_PULL_ENABLED", "false").lower() in ("true", "1", "yes")
+
+CONTACT_SERVER_URL = os.environ.get("CONTACT_SERVER_URL", "http://desktop1.tail3d8f4.ts.net:9876")
+CONTACT_SERVER_TOKEN = os.environ.get("CONTACT_SERVER_TOKEN", "")
 
 IMAP_HOST = os.environ["IMAP_HOST"]
 IMAP_PORT = int(os.environ.get("IMAP_PORT", 993))
