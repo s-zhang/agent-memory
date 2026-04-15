@@ -9,7 +9,7 @@
       "volumes": [{ "mount": "/data", "name": "falkordb_data" }]
     },
     "zep": {
-      "image": "ghcr.io/getzep/zep:latest",
+      "source": { "repo": ".", "buildContext": "zep" },
       "dependsOn": ["falkordb"],
       "variables": {
         "ZEP_STORE_TYPE": "falkordb",
