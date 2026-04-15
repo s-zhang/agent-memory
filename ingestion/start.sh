@@ -22,13 +22,17 @@ tailscaled \
         tailscale status >/dev/null 2>&1 && break
         sleep 1
     done
+    echo "[tailscale] running tailscale up..."
     tailscale up \
         --auth-key="${TS_AUTHKEY}" \
         --hostname="railway-ingestion" \
         --accept-dns=false \
-        --ephemeral \
+        --reset \
+        2>&1 | sed 's/^/[tailscale] /'
+    echo "[tailscale] tailscale up exit code: $?"
+    tailscale status 2>&1 | head -3 | sed 's/^/[tailscale] /' \
         && echo "[tailscale] Connected to tailnet" \
-        || echo "[tailscale] WARNING: tailscale up failed — contact resolver will fall back to raw addresses"
+        || echo "[tailscale] WARNING: not connected — contact resolver will fall back to raw addresses"
 ) &
 
 # Expose the SOCKS5 address for the contact resolver to use explicitly.
