@@ -38,6 +38,6 @@ tailscaled \
 # Expose the SOCKS5 address for the contact resolver to use explicitly.
 # We do NOT set ALL_PROXY globally — that would route Railway-internal
 # traffic (Zep, Qdrant) through Tailscale and break startup.
-export TAILSCALE_SOCKS5=socks5h://localhost:1055
+export TAILSCALE_SOCKS5=socks5://localhost:1055
 
 exec uvicorn main:app --host 0.0.0.0 --port "${PORT:-8000}"
