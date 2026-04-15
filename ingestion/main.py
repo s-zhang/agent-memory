@@ -84,21 +84,37 @@ async def health():
 
 
 
+def _is_tailscale_ip(client_ip: str) -> bool:
+    """Tailscale assigns IPs in the 100.64.0.0/10 range."""
+    try:
+        parts = client_ip.split(".")
+        if len(parts) != 4:
+            return False
+        first, second = int(parts[0]), int(parts[1])
+        return first == 100 and 64 <= second <= 127
+    except (ValueError, IndexError):
+        return False
+
+
 async def _mcp_asgi(scope, receive, send):
     if MCP_API_KEY:
-        headers = dict(scope.get("headers", []))
-        auth = headers.get(b"authorization", b"").decode()
-        if auth != f"Bearer {MCP_API_KEY}":
-            response = Response(
-                content='{"error":"unauthorized","error_description":"Invalid or missing bearer token"}',
-                status_code=401,
-                headers={
-                    "WWW-Authenticate": "Bearer",
-                    "Content-Type": "application/json",
-                },
-            )
-            await response(scope, receive, send)
-            return
+        # Requests from Tailscale IPs are trusted — no Bearer token required.
+        client = scope.get("client")
+        client_ip = client[0] if client else ""
+        if not _is_tailscale_ip(client_ip):
+            headers = dict(scope.get("headers", []))
+            auth = headers.get(b"authorization", b"").decode()
+            if auth != f"Bearer {MCP_API_KEY}":
+                response = Response(
+                    content='{"error":"unauthorized","error_description":"Invalid or missing bearer token"}',
+                    status_code=401,
+                    headers={
+                        "WWW-Authenticate": "Bearer",
+                        "Content-Type": "application/json",
+                    },
+                )
+                await response(scope, receive, send)
+                return
 
     # Health probes (plain GET without SSE Accept) should return 200, not 406.
     # The MCP manager returns 406 for GETs lacking "Accept: text/event-stream",
