@@ -84,37 +84,31 @@ async def health():
 
 
 
-def _is_tailscale_ip(client_ip: str) -> bool:
-    """Tailscale assigns IPs in the 100.64.0.0/10 range."""
-    try:
-        parts = client_ip.split(".")
-        if len(parts) != 4:
-            return False
-        first, second = int(parts[0]), int(parts[1])
-        return first == 100 and 64 <= second <= 127
-    except (ValueError, IndexError):
-        return False
+def _parse_token_from_query(query_string: bytes) -> str:
+    """Extract ?token= value from ASGI query string."""
+    for part in query_string.decode(errors="replace").split("&"):
+        if part.startswith("token="):
+            return part[len("token="):]
+    return ""
 
 
 async def _mcp_asgi(scope, receive, send):
     if MCP_API_KEY:
-        # Requests from Tailscale IPs are trusted — no Bearer token required.
-        client = scope.get("client")
-        client_ip = client[0] if client else ""
-        if not _is_tailscale_ip(client_ip):
-            headers = dict(scope.get("headers", []))
-            auth = headers.get(b"authorization", b"").decode()
-            if auth != f"Bearer {MCP_API_KEY}":
-                response = Response(
-                    content='{"error":"unauthorized","error_description":"Invalid or missing bearer token"}',
-                    status_code=401,
-                    headers={
-                        "WWW-Authenticate": "Bearer",
-                        "Content-Type": "application/json",
-                    },
-                )
-                await response(scope, receive, send)
-                return
+        headers = dict(scope.get("headers", []))
+        bearer = headers.get(b"authorization", b"").decode()
+        query_token = _parse_token_from_query(scope.get("query_string", b""))
+        authed = (bearer == f"Bearer {MCP_API_KEY}") or (query_token == MCP_API_KEY)
+        if not authed:
+            response = Response(
+                content='{"error":"unauthorized","error_description":"Invalid or missing token"}',
+                status_code=401,
+                headers={
+                    "WWW-Authenticate": "Bearer",
+                    "Content-Type": "application/json",
+                },
+            )
+            await response(scope, receive, send)
+            return
 
     # Health probes (plain GET without SSE Accept) should return 200, not 406.
     # The MCP manager returns 406 for GETs lacking "Accept: text/event-stream",
