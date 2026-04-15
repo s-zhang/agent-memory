@@ -8,6 +8,7 @@ Resolution order:
   3. Fall back to raw address if no match, timeout, or error
 """
 import logging
+import os
 from urllib.parse import quote
 
 import httpx
@@ -36,6 +37,13 @@ async def resolve_name(address: str) -> str:
     return name
 
 
+def _make_client() -> httpx.AsyncClient:
+    """Build an httpx client, routing through Tailscale SOCKS5 if available."""
+    socks5 = os.environ.get("TAILSCALE_SOCKS5", "")
+    proxies = {"all://": socks5} if socks5 else None
+    return httpx.AsyncClient(timeout=_TIMEOUT, proxies=proxies)
+
+
 async def _lookup(address: str) -> str:
     if not config.CONTACT_SERVER_URL:
         return address
@@ -46,7 +54,7 @@ async def _lookup(address: str) -> str:
         headers["Authorization"] = f"Bearer {config.CONTACT_SERVER_TOKEN}"
 
     try:
-        async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
+        async with _make_client() as client:
             r = await client.get(url, headers=headers)
             r.raise_for_status()
             matches = r.json().get("matches", [])

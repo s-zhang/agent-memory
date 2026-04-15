@@ -31,9 +31,9 @@ tailscaled \
         || echo "[tailscale] WARNING: tailscale up failed — contact resolver will fall back to raw addresses"
 ) &
 
-# Route Tailscale traffic through the SOCKS5 proxy.
-# Railway internal services bypass it via NO_PROXY.
-export ALL_PROXY=socks5h://localhost:1055
-export NO_PROXY="localhost,127.0.0.1,*.railway.internal"
+# Expose the SOCKS5 address for the contact resolver to use explicitly.
+# We do NOT set ALL_PROXY globally — that would route Railway-internal
+# traffic (Zep, Qdrant) through Tailscale and break startup.
+export TAILSCALE_SOCKS5=socks5h://localhost:1055
 
 exec uvicorn main:app --host 0.0.0.0 --port "${PORT:-8000}"
