@@ -21,11 +21,12 @@ async def _ensure_user() -> None:
     async with httpx.AsyncClient(base_url=config.ZEP_URL) as client:
         r = await client.get(f"/api/v2/users/{config.ZEP_USER_ID}", headers=HEADERS)
         if r.status_code == 404:
-            await client.post(
+            r2 = await client.post(
                 "/api/v2/users",
                 headers=HEADERS,
                 json={"user_id": config.ZEP_USER_ID},
             )
+            r2.raise_for_status()
 
 
 async def _ensure_session(session_id: str, metadata: dict | None = None) -> None:

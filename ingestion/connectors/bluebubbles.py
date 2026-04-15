@@ -75,7 +75,8 @@ async def _ingest_message(msg: dict, chat_guid: str) -> None:
     )
 
     # Use chat GUID as Zep session so all messages in a thread share context.
-    session_id = f"imessage_{chat_guid.replace(':', '_').replace('+', '')}"
+    # Strip characters that break URL routing (;, :, +).
+    session_id = f"imessage_{chat_guid.replace(':', '_').replace('+', '').replace(';', '_')}"
 
     await zep_writer.add_message_episode(
         session_id=session_id,
