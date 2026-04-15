@@ -23,7 +23,7 @@ tailscaled \
         sleep 1
     done
     tailscale up \
-        --authkey="${TS_AUTHKEY}" \
+        --auth-key="${TS_AUTHKEY}" \
         --hostname="railway-ingestion" \
         --accept-dns=false \
         --ephemeral \
