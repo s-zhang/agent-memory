@@ -1,7 +1,8 @@
 """
 MCP server (SSE transport) mounted inside the ingestion FastAPI app.
-Exposes: remember, recall, search_docs, get_digest
+Exposes: remember, recall, get_digest
 """
+import asyncio
 import uuid as _uuid
 from datetime import datetime
 from pathlib import Path
@@ -37,33 +38,16 @@ async def list_tools() -> list[Tool]:
         Tool(
             name="recall",
             description=(
-                "Semantic search over long-term memory (iMessages, emails, past facts). "
-                "Use this to answer questions about past events or learned preferences."
+                "Semantic search over all memory: extracted facts from the knowledge graph "
+                "(iMessages, emails, Notion, remembered facts) plus raw document text "
+                "(Notion pages, email bodies). Use this to answer any question about past "
+                "events, preferences, decisions, or document content."
             ),
             inputSchema={
                 "type": "object",
                 "properties": {
                     "query": {"type": "string", "description": "What to search for in memory"},
                     "limit": {"type": "integer", "default": 5},
-                },
-                "required": ["query"],
-            },
-        ),
-        Tool(
-            name="search_docs",
-            description=(
-                "Semantic search over raw documents: Notion pages, email bodies. "
-                "Use when you need the actual source text, not just extracted facts."
-            ),
-            inputSchema={
-                "type": "object",
-                "properties": {
-                    "query": {"type": "string", "description": "What to search for"},
-                    "limit": {"type": "integer", "default": 5},
-                    "sources": {
-                        "type": "array",
-                        "items": {"type": "string", "enum": ["notion", "email"]},
-                    },
                 },
                 "required": ["query"],
             },
@@ -107,43 +91,40 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
             query = arguments["query"]
             limit = arguments.get("limit", 5)
 
-            # Search Graphiti knowledge graph for extracted facts (higher signal)
-            graph_results = await graphiti_writer.search(query, num_results=limit)
-
-            # Search Qdrant for raw content matches
-            qdrant_results = await qdrant_writer.search_docs(
-                query=query,
-                limit=limit,
-                source_filter=["imessage", "email", "memory"],
+            # Run both searches concurrently
+            graph_results, raw_fact_results, doc_results = await asyncio.gather(
+                graphiti_writer.search(query, num_results=limit),
+                qdrant_writer.search_docs(query=query, limit=limit, source_filter=["imessage", "email", "memory"]),
+                qdrant_writer.search_docs(query=query, limit=limit, source_filter=["notion", "email"]),
             )
 
-            lines: list[str] = []
-            for r in graph_results:
-                ts = f" ({r['valid_at'][:10]})" if r.get("valid_at") else ""
-                lines.append(f"[KNOWLEDGE{ts}] {r['fact']}")
-            for r in qdrant_results:
-                source_label = r["source"].upper()
-                lines.append(f"[{source_label}] {r['text']} (relevance: {r['score']})")
+            parts: list[str] = []
 
-            if not lines:
+            if graph_results:
+                parts.append("## Facts")
+                for r in graph_results:
+                    ts = f" ({r['valid_at'][:10]})" if r.get("valid_at") else ""
+                    parts.append(f"[KNOWLEDGE{ts}] {r['fact']}")
+
+            if raw_fact_results:
+                parts.append("## Messages & Notes")
+                for r in raw_fact_results:
+                    parts.append(f"[{r['source'].upper()}] {r['text']} (relevance: {r['score']})")
+
+            # Deduplicate doc results against raw_fact_results by source_id
+            seen_ids = {r["source_id"] for r in raw_fact_results if r.get("source_id")}
+            unique_docs = [r for r in doc_results if r.get("source_id") not in seen_ids]
+            if unique_docs:
+                parts.append("## Documents")
+                for r in unique_docs:
+                    header = f"[{r['source'].upper()}] {r['title']}"
+                    if r.get("url"):
+                        header += f" - {r['url']}"
+                    parts.append(f"{header}\n{r['text']}\n(relevance: {r['score']})")
+
+            if not parts:
                 return [TextContent(type="text", text="No relevant memories found.")]
-            return [TextContent(type="text", text="\n\n".join(lines))]
-
-        elif name == "search_docs":
-            results = await qdrant_writer.search_docs(
-                query=arguments["query"],
-                limit=arguments.get("limit", 5),
-                source_filter=arguments.get("sources"),
-            )
-            if not results:
-                return [TextContent(type="text", text="No documents found.")]
-            parts = []
-            for r in results:
-                header = f"[{r['source'].upper()}] {r['title']}"
-                if r.get("url"):
-                    header += f" - {r['url']}"
-                parts.append(f"{header}\n{r['text']}\n(relevance: {r['score']})")
-            return [TextContent(type="text", text="\n\n---\n\n".join(parts))]
+            return [TextContent(type="text", text="\n\n".join(parts))]
 
         elif name == "get_digest":
             try:
