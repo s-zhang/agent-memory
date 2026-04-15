@@ -6,12 +6,12 @@ set -e
 # Auth runs in the background so uvicorn starts immediately and Railway's
 # health check doesn't time out.
 # ---------------------------------------------------------------------------
-mkdir -p /var/lib/tailscale
+mkdir -p /db/tailscale
 
 tailscaled \
     --tun=userspace-networking \
     --socks5-server=localhost:1055 \
-    --statedir=/var/lib/tailscale \
+    --statedir=/db/tailscale \
     2>&1 | sed 's/^/[tailscale] /' &
 
 # Authenticate asynchronously — uvicorn starts before this finishes.
