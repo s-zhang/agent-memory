@@ -26,14 +26,19 @@ async def _ensure_user() -> None:
                 headers=HEADERS,
                 json={"user_id": config.ZEP_USER_ID},
             )
-            r2.raise_for_status()
+            if not r2.is_success:
+                logger.warning(
+                    "Zep user creation failed (status=%s body=%s) — Zep may not be ready",
+                    r2.status_code,
+                    r2.text[:200],
+                )
 
 
 async def _ensure_session(session_id: str, metadata: dict | None = None) -> None:
     async with httpx.AsyncClient(base_url=config.ZEP_URL) as client:
         r = await client.get(f"/api/v2/sessions/{session_id}", headers=HEADERS)
         if r.status_code == 404:
-            await client.post(
+            r2 = await client.post(
                 "/api/v2/sessions",
                 headers=HEADERS,
                 json={
@@ -42,6 +47,12 @@ async def _ensure_session(session_id: str, metadata: dict | None = None) -> None
                     "metadata": metadata or {},
                 },
             )
+            if not r2.is_success:
+                logger.warning(
+                    "Zep session creation failed (status=%s body=%s)",
+                    r2.status_code,
+                    r2.text[:200],
+                )
 
 
 async def add_message_episode(
@@ -78,8 +89,15 @@ async def add_message_episode(
             headers=HEADERS,
             json=episode,
         )
-        r.raise_for_status()
-        logger.debug("Zep episode added to session %s", session_id)
+        if r.is_success:
+            logger.debug("Zep episode added to session %s", session_id)
+        else:
+            logger.warning(
+                "Zep episode write failed (session=%s status=%s body=%s)",
+                session_id,
+                r.status_code,
+                r.text[:200],
+            )
 
 
 async def add_text_episode(
@@ -107,5 +125,12 @@ async def add_text_episode(
             headers=HEADERS,
             json=episode,
         )
-        r.raise_for_status()
-        logger.debug("Zep text episode added to session %s", session_id)
+        if r.is_success:
+            logger.debug("Zep text episode added to session %s", session_id)
+        else:
+            logger.warning(
+                "Zep text episode write failed (session=%s status=%s body=%s)",
+                session_id,
+                r.status_code,
+                r.text[:200],
+            )
