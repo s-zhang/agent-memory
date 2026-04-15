@@ -18,9 +18,10 @@ MESSAGE_EVENTS = {"new-message", "updated-message"}
 async def verify_token(request: Request) -> None:
     if not config.BLUEBUBBLES_WEBHOOK_SECRET:
         return
-    token = request.headers.get("Authorization", "").removeprefix("Bearer ").strip()
-    if token != config.BLUEBUBBLES_WEBHOOK_SECRET:
-        raise HTTPException(status_code=401, detail="Invalid BlueBubbles webhook token")
+    # BlueBubbles sends the secret as ?password= query param
+    secret = request.query_params.get("password", "")
+    if secret != config.BLUEBUBBLES_WEBHOOK_SECRET:
+        raise HTTPException(status_code=401, detail="Invalid BlueBubbles webhook secret")
 
 
 async def handle(payload: dict) -> None:
