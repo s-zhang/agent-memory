@@ -17,29 +17,6 @@ services:
       retries: 5
 
   # ---------------------------------------------------------------------------
-  # Zep - temporal knowledge graph memory layer
-  # ---------------------------------------------------------------------------
-  zep:
-    image: ghcr.io/getzep/zep:latest
-    restart: unless-stopped
-    depends_on:
-      falkordb:
-        condition: service_healthy
-    ports:
-      - "8010:8000"
-    environment:
-      ZEP_STORE_TYPE: falkordb
-      ZEP_FALKORDB_URL: redis://falkordb:6379
-      ZEP_OPENAI_API_KEY: ${OPENAI_API_KEY}
-      ZEP_AUTH_SECRET: ${ZEP_API_KEY}
-      ZEP_AUTH_REQUIRED: "true"
-    healthcheck:
-      test: ["CMD", "wget", "-qO-", "http://localhost:8000/healthz"]
-      interval: 15s
-      timeout: 5s
-      retries: 5
-
-  # ---------------------------------------------------------------------------
   # Qdrant - vector store for raw document chunks (Notion, email bodies)
   # ---------------------------------------------------------------------------
   qdrant:
@@ -66,7 +43,7 @@ services:
       dockerfile: Dockerfile
     restart: unless-stopped
     depends_on:
-      zep:
+      falkordb:
         condition: service_healthy
       qdrant:
         condition: service_healthy
@@ -76,8 +53,9 @@ services:
       - digest_data:/data
       - ingestion_db:/db
     environment:
-      ZEP_URL: http://zep:8000
-      ZEP_API_KEY: ${ZEP_API_KEY}
+      FALKORDB_HOST: falkordb
+      FALKORDB_PORT: "6379"
+      GRAPHITI_GROUP_ID: ${GRAPHITI_GROUP_ID:-personal}
       QDRANT_URL: http://qdrant:6333
       QDRANT_API_KEY: ${QDRANT_API_KEY}
       OPENAI_API_KEY: ${OPENAI_API_KEY}

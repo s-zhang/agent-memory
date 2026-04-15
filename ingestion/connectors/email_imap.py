@@ -1,6 +1,6 @@
 """
 IMAP email connector - poll for new/updated emails.
-- Email facts -> Zep (via text episode, one per thread)
+- Email facts -> Graphiti knowledge graph (via text episode, one per thread)
 - Email bodies -> Qdrant (raw chunks for verbatim retrieval)
 """
 import email
@@ -15,7 +15,7 @@ import html2text
 
 import config
 import dedup
-from writers import qdrant_writer, zep_writer
+from writers import graphiti_writer, qdrant_writer
 
 logger = logging.getLogger(__name__)
 
@@ -144,14 +144,15 @@ async def _ingest_raw_email(raw_bytes: bytes) -> None:
         },
     )
 
-    # Zep: feed as episode so facts get extracted
+    # Graphiti: feed as episode so entities and facts get extracted
     session_id = _session_id_for_thread(thread_id, subject)
     summary = f"Email from {sender} about '{subject}':\n{body[:1000]}"
-    await zep_writer.add_text_episode(
-        session_id=session_id,
-        content=summary,
+    await graphiti_writer.add_episode(
+        name=session_id,
+        body=summary,
         source="email",
-        metadata={"message_id": message_id, "subject": subject, "sender": sender},
+        source_description=f"Email from {sender} about '{subject}'",
+        reference_time=timestamp,
     )
 
     dedup.mark_ingested("email", message_id, h)

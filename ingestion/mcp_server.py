@@ -2,24 +2,17 @@
 MCP server (SSE transport) mounted inside the ingestion FastAPI app.
 Exposes: remember, recall, search_docs, get_digest
 """
-import os
+import uuid as _uuid
+from datetime import datetime
 from pathlib import Path
+import os
 
-import httpx
 from mcp.server import Server
 from mcp.types import TextContent, Tool
 
-from writers import qdrant_writer
+from writers import graphiti_writer, qdrant_writer
 
-ZEP_URL = os.environ["ZEP_URL"]
-ZEP_API_KEY = os.environ["ZEP_API_KEY"]
-ZEP_USER_ID = os.environ.get("ZEP_USER_ID", "owner")
 DIGEST_PATH = os.environ.get("DIGEST_PATH", "/data/digest.txt")
-
-ZEP_HEADERS = {
-    "Authorization": f"Bearer {ZEP_API_KEY}",
-    "Content-Type": "application/json",
-}
 
 server = Server("memory")
 
@@ -90,50 +83,51 @@ async def list_tools() -> list[Tool]:
 async def call_tool(name: str, arguments: dict) -> list[TextContent]:
     try:
         if name == "remember":
-            session_id = "openclaw_session"
-            async with httpx.AsyncClient(base_url=ZEP_URL) as client:
-                r = await client.get(f"/api/v2/sessions/{session_id}", headers=ZEP_HEADERS)
-                if r.status_code == 404:
-                    await client.post(
-                        "/api/v2/sessions",
-                        headers=ZEP_HEADERS,
-                        json={"session_id": session_id, "user_id": ZEP_USER_ID},
-                    )
-                r = await client.post(
-                    f"/api/v2/sessions/{session_id}/memory",
-                    headers=ZEP_HEADERS,
-                    json={"type": "text", "content": arguments["content"], "source": "openclaw"},
-                )
-                r.raise_for_status()
+            content = arguments["content"]
+            episode_name = f"memory_{_uuid.uuid4()}"
+
+            # Store in Qdrant for fast vector retrieval
+            await qdrant_writer.upsert_document(
+                source="memory",
+                source_id=episode_name,
+                title="Remembered fact",
+                text=content,
+            )
+            # Store in Graphiti for knowledge graph extraction
+            await graphiti_writer.add_episode(
+                name=episode_name,
+                body=content,
+                source="memory",
+                source_description="Explicitly remembered fact from conversation",
+                reference_time=datetime.utcnow(),
+            )
             return [TextContent(type="text", text="Remembered.")]
 
         elif name == "recall":
-            async with httpx.AsyncClient(base_url=ZEP_URL) as client:
-                r = await client.post(
-                    "/api/v2/graph/search",
-                    headers=ZEP_HEADERS,
-                    json={
-                        "query": arguments["query"],
-                        "user_id": ZEP_USER_ID,
-                        "limit": arguments.get("limit", 5),
-                        "search_type": "edge",
-                    },
-                )
-                if not r.is_success:
-                    return [TextContent(type="text", text="No relevant memories found.")]
-                edges = r.json().get("edges", [])
-                facts = [e for e in edges if e.get("fact")]
-                if not facts:
-                    return [TextContent(type="text", text="No relevant memories found.")]
-                lines = []
-                for e in facts:
-                    line = f"- {e['fact']}"
-                    if e.get("valid_at"):
-                        line += f" (since {e['valid_at'][:10]})"
-                    if e.get("invalid_at"):
-                        line += " [superseded]"
-                    lines.append(line)
-            return [TextContent(type="text", text="\n".join(lines))]
+            query = arguments["query"]
+            limit = arguments.get("limit", 5)
+
+            # Search Graphiti knowledge graph for extracted facts (higher signal)
+            graph_results = await graphiti_writer.search(query, num_results=limit)
+
+            # Search Qdrant for raw content matches
+            qdrant_results = await qdrant_writer.search_docs(
+                query=query,
+                limit=limit,
+                source_filter=["imessage", "email", "memory"],
+            )
+
+            lines: list[str] = []
+            for r in graph_results:
+                ts = f" ({r['valid_at'][:10]})" if r.get("valid_at") else ""
+                lines.append(f"[KNOWLEDGE{ts}] {r['fact']}")
+            for r in qdrant_results:
+                source_label = r["source"].upper()
+                lines.append(f"[{source_label}] {r['text']} (relevance: {r['score']})")
+
+            if not lines:
+                return [TextContent(type="text", text="No relevant memories found.")]
+            return [TextContent(type="text", text="\n\n".join(lines))]
 
         elif name == "search_docs":
             results = await qdrant_writer.search_docs(

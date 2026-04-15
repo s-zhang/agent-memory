@@ -1,52 +1,33 @@
 """
 Nightly digest builder.
-Queries Zep for recent memory, summarizes with GPT, writes to DIGEST_PATH.
-OpenClaw reads this at session start via the memory-mcp hook.
+Queries Graphiti for recent knowledge graph facts, summarizes with GPT,
+writes to DIGEST_PATH. OpenClaw reads this at session start via the memory-mcp hook.
 """
 import logging
-from datetime import datetime, timedelta
+from datetime import datetime
 from pathlib import Path
 
-import httpx
 from openai import AsyncOpenAI
 
 import config
+from writers import graphiti_writer
 
 logger = logging.getLogger(__name__)
 
-ZEP_HEADERS = {
-    "Authorization": f"Bearer {config.ZEP_API_KEY}",
-    "Content-Type": "application/json",
-}
 
-
-async def _get_recent_facts(since_hours: int = 24) -> list[str]:
-    """Search Zep for facts added in the last N hours."""
-    facts = []
-    try:
-        async with httpx.AsyncClient(base_url=config.ZEP_URL) as client:
-            r = await client.post(
-                "/api/v2/graph/search",
-                headers=ZEP_HEADERS,
-                json={
-                    "query": "recent activity",
-                    "user_id": config.ZEP_USER_ID,
-                    "limit": 50,
-                    "search_type": "edge",
-                },
-            )
-            if r.is_success:
-                for edge in r.json().get("edges", []):
-                    facts.append(edge.get("fact", ""))
-    except Exception as e:
-        logger.error("Failed to fetch Zep facts for digest: %s", e)
-    return [f for f in facts if f]
+async def _get_recent_facts() -> list[str]:
+    """Search Graphiti for recent facts."""
+    results = await graphiti_writer.search(
+        "recent activity and events",
+        num_results=50,
+    )
+    return [r["fact"] for r in results if r.get("fact")]
 
 
 async def build_digest() -> None:
     """Build a plain-text 24h summary and write to DIGEST_PATH."""
     logger.info("Building nightly digest")
-    facts = await _get_recent_facts(since_hours=24)
+    facts = await _get_recent_facts()
 
     if not facts:
         summary = f"No recent activity recorded as of {datetime.utcnow().strftime('%Y-%m-%d')}."

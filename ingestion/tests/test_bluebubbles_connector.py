@@ -3,7 +3,9 @@ import pytest
 from datetime import datetime
 from unittest.mock import AsyncMock, patch, MagicMock
 
-
+# Test payloads use fake/placeholder phone numbers.
+# NEVER use real contact numbers in outbound test sends.
+# These payloads are injected as webhook data — no real messages are sent.
 WEBHOOK_PAYLOAD = {
     "type": "new-message",
     "data": {
@@ -12,11 +14,11 @@ WEBHOOK_PAYLOAD = {
         "isFromMe": False,
         "dateCreated": 1776210267801,
         "handle": {
-            "address": "+19172325246",
+            "address": "+10000000001",
             "service": "iMessage",
             "country": "US",
         },
-        "chats": [{"guid": "iMessage;-;+19172325246"}],
+        "chats": [{"guid": "iMessage;-;+10000000001"}],
     },
 }
 
@@ -28,11 +30,11 @@ WEBHOOK_PAYLOAD_FROM_ME = {
         "isFromMe": True,
         "dateCreated": 1776210300000,
         "handle": {
-            "address": "+14127089192",
+            "address": "+10000000001",
             "service": "iMessage",
             "country": "US",
         },
-        "chats": [{"guid": "iMessage;-;+19172325246"}],
+        "chats": [{"guid": "iMessage;-;+10000000001"}],
     },
 }
 
@@ -47,9 +49,16 @@ def mock_dedup():
 
 
 @pytest.fixture(autouse=True)
-def mock_zep():
-    with patch("connectors.bluebubbles.zep_writer") as mock:
-        mock.add_message_episode = AsyncMock()
+def mock_graphiti():
+    with patch("connectors.bluebubbles.graphiti_writer") as mock:
+        mock.add_episode = AsyncMock()
+        yield mock
+
+
+@pytest.fixture(autouse=True)
+def mock_qdrant():
+    with patch("connectors.bluebubbles.qdrant_writer") as mock:
+        mock.upsert_document = AsyncMock()
         yield mock
 
 
@@ -62,65 +71,85 @@ def clear_handle_log():
 
 
 @pytest.mark.asyncio
-async def test_webhook_resolves_contact_name(mock_zep):
-    with patch("connectors.bluebubbles.resolve_name", new=AsyncMock(return_value="Andrew Chang")):
+async def test_webhook_resolves_contact_name(mock_graphiti):
+    with patch("connectors.bluebubbles.resolve_name", new=AsyncMock(return_value="Alex Test")):
         from connectors.bluebubbles import ingest_webhook_message
         await ingest_webhook_message(WEBHOOK_PAYLOAD)
 
-    mock_zep.add_message_episode.assert_called_once()
-    call_kwargs = mock_zep.add_message_episode.call_args.kwargs
-    assert call_kwargs["role"] == "Andrew Chang"
-    assert call_kwargs["role_type"] == "user"
+    mock_graphiti.add_episode.assert_called_once()
+    kwargs = mock_graphiti.add_episode.call_args.kwargs
+    assert "Alex Test: Hey, lunch tomorrow?" == kwargs["body"]
+    assert kwargs["source"] == "imessage"
 
 
 @pytest.mark.asyncio
-async def test_webhook_from_me_skips_resolver(mock_zep):
+async def test_webhook_from_me_skips_resolver(mock_graphiti):
     with patch("connectors.bluebubbles.resolve_name", new=AsyncMock()) as mock_resolve:
         from connectors.bluebubbles import ingest_webhook_message
         await ingest_webhook_message(WEBHOOK_PAYLOAD_FROM_ME)
 
         mock_resolve.assert_not_called()
 
-    call_kwargs = mock_zep.add_message_episode.call_args.kwargs
-    assert call_kwargs["role"] == "me"
-    assert call_kwargs["role_type"] == "user"
+    kwargs = mock_graphiti.add_episode.call_args.kwargs
+    assert kwargs["body"].startswith("me: ")
 
 
 @pytest.mark.asyncio
-async def test_webhook_falls_back_to_address_when_resolver_fails(mock_zep):
-    with patch("connectors.bluebubbles.resolve_name", new=AsyncMock(return_value="+19172325246")):
+async def test_webhook_falls_back_to_address_when_resolver_returns_number(mock_graphiti):
+    with patch("connectors.bluebubbles.resolve_name", new=AsyncMock(return_value="+10000000001")):
         from connectors.bluebubbles import ingest_webhook_message
         await ingest_webhook_message(WEBHOOK_PAYLOAD)
 
-    call_kwargs = mock_zep.add_message_episode.call_args.kwargs
-    assert call_kwargs["role"] == "+19172325246"
+    kwargs = mock_graphiti.add_episode.call_args.kwargs
+    assert kwargs["body"].startswith("+10000000001: ")
 
 
 @pytest.mark.asyncio
-async def test_empty_text_skipped(mock_zep):
+async def test_empty_text_skipped(mock_graphiti):
     payload = dict(WEBHOOK_PAYLOAD)
     payload["data"] = {**WEBHOOK_PAYLOAD["data"], "text": "   "}
     from connectors.bluebubbles import ingest_webhook_message
     await ingest_webhook_message(payload)
-    mock_zep.add_message_episode.assert_not_called()
+    mock_graphiti.add_episode.assert_not_called()
 
 
 @pytest.mark.asyncio
-async def test_pull_disabled_by_default(mock_zep):
+async def test_pull_disabled_by_default(mock_graphiti):
     with patch("connectors.bluebubbles.config") as mock_config:
         mock_config.BLUEBUBBLES_PULL_ENABLED = False
         from connectors.bluebubbles import pull_recent
         await pull_recent()
-    mock_zep.add_message_episode.assert_not_called()
+    mock_graphiti.add_episode.assert_not_called()
 
 
 @pytest.mark.asyncio
-async def test_session_id_derived_from_chat_guid(mock_zep):
-    with patch("connectors.bluebubbles.resolve_name", new=AsyncMock(return_value="Andrew Chang")):
+async def test_session_id_derived_from_chat_guid(mock_graphiti):
+    with patch("connectors.bluebubbles.resolve_name", new=AsyncMock(return_value="Alex Test")):
         from connectors.bluebubbles import ingest_webhook_message
         await ingest_webhook_message(WEBHOOK_PAYLOAD)
 
-    call_kwargs = mock_zep.add_message_episode.call_args.kwargs
-    assert call_kwargs["session_id"] == "imessage_iMessage;-;19172325246"
-    assert call_kwargs["metadata"]["chat_guid"] == "iMessage;-;+19172325246"
-    assert call_kwargs["metadata"]["contact"] == "Andrew Chang"
+    kwargs = mock_graphiti.add_episode.call_args.kwargs
+    # chat_guid "iMessage;-;+10000000001" → strip ':', replace '+' with '', replace ';' with '_'
+    assert kwargs["name"] == "imessage_iMessage_-_10000000001"
+
+
+@pytest.mark.asyncio
+async def test_episode_reference_time_is_datetime(mock_graphiti):
+    with patch("connectors.bluebubbles.resolve_name", new=AsyncMock(return_value="Alex Test")):
+        from connectors.bluebubbles import ingest_webhook_message
+        await ingest_webhook_message(WEBHOOK_PAYLOAD)
+
+    kwargs = mock_graphiti.add_episode.call_args.kwargs
+    assert isinstance(kwargs["reference_time"], datetime)
+
+
+@pytest.mark.asyncio
+async def test_qdrant_also_written(mock_qdrant):
+    with patch("connectors.bluebubbles.resolve_name", new=AsyncMock(return_value="Alex Test")):
+        from connectors.bluebubbles import ingest_webhook_message
+        await ingest_webhook_message(WEBHOOK_PAYLOAD)
+
+    mock_qdrant.upsert_document.assert_called_once()
+    kwargs = mock_qdrant.upsert_document.call_args.kwargs
+    assert kwargs["source"] == "imessage"
+    assert "Alex Test" in kwargs["text"]

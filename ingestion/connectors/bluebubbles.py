@@ -12,7 +12,7 @@ import httpx
 import config
 import dedup
 from resolvers.contact_resolver import resolve_name
-from writers import zep_writer
+from writers import graphiti_writer, qdrant_writer
 
 logger = logging.getLogger(__name__)
 
@@ -64,9 +64,6 @@ async def _ingest_message(msg: dict, chat_guid: str) -> None:
     else:
         sender = await resolve_name(address) if address else "unknown"
 
-    # Both sides are humans — role_type "user" is correct for Zep human-to-human threads.
-    role_type = "user"
-
     timestamp_ms = msg.get("dateCreated") or msg.get("date")
     timestamp = (
         datetime.utcfromtimestamp(timestamp_ms / 1000)
@@ -74,17 +71,22 @@ async def _ingest_message(msg: dict, chat_guid: str) -> None:
         else datetime.utcnow()
     )
 
-    # Use chat GUID as Zep session so all messages in a thread share context.
-    # Strip characters that break URL routing (;, :, +).
+    # Use chat GUID as session/episode name — strip chars that break URL routing (;, :, +).
     session_id = f"imessage_{chat_guid.replace(':', '_').replace('+', '').replace(';', '_')}"
 
-    await zep_writer.add_message_episode(
-        session_id=session_id,
-        role=sender,
-        role_type=role_type,
-        content=text,
-        timestamp=timestamp,
-        metadata={"source": "imessage", "chat_guid": chat_guid, "contact": sender},
+    await graphiti_writer.add_episode(
+        name=session_id,
+        body=f"{sender}: {text}",
+        source="imessage",
+        source_description=f"iMessage conversation in chat {chat_guid}",
+        reference_time=timestamp,
+    )
+    await qdrant_writer.upsert_document(
+        source="imessage",
+        source_id=msg_id,
+        title=f"iMessage: {sender}",
+        text=f"{sender}: {text}",
+        extra_metadata={"chat_guid": chat_guid, "contact": sender, "timestamp": timestamp.isoformat()},
     )
     dedup.mark_ingested("imessage", msg_id, h)
 

@@ -6,8 +6,10 @@ import sys
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 # Stub all required env vars so config.py doesn't raise KeyError
-os.environ.setdefault("ZEP_URL", "http://zep.test:8000")
-os.environ.setdefault("ZEP_API_KEY", "test-zep-key")
+os.environ.setdefault("FALKORDB_BOLT_URL", "bolt://falkordb.test:7687")
+os.environ.setdefault("FALKORDB_USER", "")
+os.environ.setdefault("FALKORDB_PASSWORD", "")
+os.environ.setdefault("GRAPHITI_GROUP_ID", "test")
 os.environ.setdefault("QDRANT_URL", "http://qdrant.test:6333")
 os.environ.setdefault("QDRANT_API_KEY", "test-qdrant-key")
 os.environ.setdefault("OPENAI_API_KEY", "test-openai-key")

@@ -8,17 +8,6 @@
       "image": "falkordb/falkordb:latest",
       "volumes": [{ "mount": "/data", "name": "falkordb_data" }]
     },
-    "zep": {
-      "source": { "repo": ".", "buildContext": "zep" },
-      "dependsOn": ["falkordb"],
-      "variables": {
-        "ZEP_STORE_TYPE": "falkordb",
-        "ZEP_FALKORDB_URL": "redis://${{falkordb.RAILWAY_PRIVATE_DOMAIN}}:6379",
-        "ZEP_OPENAI_API_KEY": "${{shared.OPENAI_API_KEY}}",
-        "ZEP_AUTH_SECRET": "${{shared.ZEP_API_KEY}}",
-        "ZEP_AUTH_REQUIRED": "true"
-      }
-    },
     "qdrant": {
       "image": "qdrant/qdrant:latest",
       "volumes": [{ "mount": "/qdrant/storage", "name": "qdrant_data" }],
@@ -28,14 +17,15 @@
     },
     "ingestion": {
       "source": { "repo": ".", "buildContext": "ingestion" },
-      "dependsOn": ["zep", "qdrant"],
+      "dependsOn": ["falkordb", "qdrant"],
       "volumes": [
         { "mount": "/data", "name": "digest_data" },
         { "mount": "/db", "name": "ingestion_db" }
       ],
       "variables": {
-        "ZEP_URL": "http://${{zep.RAILWAY_PRIVATE_DOMAIN}}:8000",
-        "ZEP_API_KEY": "${{shared.ZEP_API_KEY}}",
+        "FALKORDB_HOST": "${{falkordb.RAILWAY_PRIVATE_DOMAIN}}",
+        "FALKORDB_PORT": "6379",
+        "GRAPHITI_GROUP_ID": "personal",
         "QDRANT_URL": "http://${{qdrant.RAILWAY_PRIVATE_DOMAIN}}:6333",
         "QDRANT_API_KEY": "${{shared.QDRANT_API_KEY}}",
         "OPENAI_API_KEY": "${{shared.OPENAI_API_KEY}}",

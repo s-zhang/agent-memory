@@ -3,8 +3,10 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-ZEP_URL = os.environ["ZEP_URL"]
-ZEP_API_KEY = os.environ["ZEP_API_KEY"]
+FALKORDB_HOST = os.environ.get("FALKORDB_HOST", "localhost")
+FALKORDB_PORT = int(os.environ.get("FALKORDB_PORT", "6379"))
+FALKORDB_PASSWORD = os.environ.get("FALKORDB_PASSWORD", "")
+GRAPHITI_GROUP_ID = os.environ.get("GRAPHITI_GROUP_ID", "personal")
 
 QDRANT_URL = os.environ["QDRANT_URL"]
 QDRANT_API_KEY = os.environ["QDRANT_API_KEY"]
@@ -39,5 +41,3 @@ DIGEST_PATH = os.environ.get("DIGEST_PATH", "/data/digest.txt")
 CHUNK_SIZE = 512
 CHUNK_OVERLAP = 64
 
-# Zep user ID for this personal instance
-ZEP_USER_ID = "owner"

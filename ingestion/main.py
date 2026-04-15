@@ -18,7 +18,7 @@ from connectors import bluebubbles, email_imap, notion
 from scheduler import create_scheduler
 from webhooks import bluebubbles as bb_webhook
 from webhooks import notion as notion_webhook
-from writers import qdrant_writer
+from writers import graphiti_writer, qdrant_writer
 from writers.qdrant_writer import ensure_collection
 
 logging.basicConfig(
@@ -41,6 +41,7 @@ async def lifespan(app: FastAPI):
     logger.info("Ingestion service starting up")
 
     await ensure_collection()
+    await graphiti_writer.init_graphiti()
 
     async def initial_pull():
         logger.info("Running initial bulk pull")
@@ -62,6 +63,7 @@ async def lifespan(app: FastAPI):
         yield
 
     scheduler.shutdown(wait=False)
+    await graphiti_writer.close_graphiti()
     logger.info("Ingestion service shut down")
 
 
