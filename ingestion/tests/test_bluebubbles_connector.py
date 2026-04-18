@@ -153,3 +153,84 @@ async def test_qdrant_also_written(mock_qdrant):
     kwargs = mock_qdrant.upsert_document.call_args.kwargs
     assert kwargs["source"] == "imessage"
     assert "Alex Test" in kwargs["text"]
+
+
+# --- Group chat tests ---
+
+GROUP_WEBHOOK_PAYLOAD = {
+    "type": "new-message",
+    "chat": {
+        "guid": "iMessage;+;chat000000000001",
+        "displayName": "Weekend Plans",
+        "participants": [
+            {"address": "+10000000002"},
+            {"address": "+10000000003"},
+        ],
+    },
+    "data": {
+        "guid": "TEST-GUID-GROUP-001",
+        "text": "Anyone free Saturday?",
+        "isFromMe": False,
+        "dateCreated": 1776210400000,
+        "handle": {
+            "address": "+10000000002",
+            "service": "iMessage",
+        },
+        "chats": [{"guid": "iMessage;+;chat000000000001"}],
+    },
+}
+
+
+@pytest.mark.asyncio
+async def test_group_chat_detected_in_source_description(mock_graphiti):
+    async def fake_resolve(address: str) -> str:
+        return {"+ 10000000002": "Alice Test", "+10000000003": "Bob Test"}.get(address, address)
+
+    with patch("connectors.bluebubbles.resolve_name", new=AsyncMock(side_effect=fake_resolve)):
+        from connectors.bluebubbles import ingest_webhook_message
+        await ingest_webhook_message(GROUP_WEBHOOK_PAYLOAD)
+
+    kwargs = mock_graphiti.add_episode.call_args.kwargs
+    assert "group chat" in kwargs["source_description"]
+    assert "Weekend Plans" in kwargs["source_description"]
+
+
+@pytest.mark.asyncio
+async def test_group_chat_metadata_in_qdrant(mock_qdrant):
+    with patch("connectors.bluebubbles.resolve_name", new=AsyncMock(return_value="Alice Test")):
+        from connectors.bluebubbles import ingest_webhook_message
+        await ingest_webhook_message(GROUP_WEBHOOK_PAYLOAD)
+
+    kwargs = mock_qdrant.upsert_document.call_args.kwargs
+    meta = kwargs["extra_metadata"]
+    assert meta["is_group_chat"] is True
+    assert meta["chat_name"] == "Weekend Plans"
+    assert isinstance(meta["participants"], list)
+
+
+@pytest.mark.asyncio
+async def test_dm_is_not_flagged_as_group(mock_qdrant):
+    with patch("connectors.bluebubbles.resolve_name", new=AsyncMock(return_value="Alex Test")):
+        from connectors.bluebubbles import ingest_webhook_message
+        await ingest_webhook_message(WEBHOOK_PAYLOAD)
+
+    kwargs = mock_qdrant.upsert_document.call_args.kwargs
+    assert kwargs["extra_metadata"]["is_group_chat"] is False
+    assert kwargs["extra_metadata"]["participants"] == []
+
+
+@pytest.mark.asyncio
+async def test_group_chat_sender_resolved_via_contact_resolver(mock_graphiti):
+    with patch("connectors.bluebubbles.resolve_name", new=AsyncMock(return_value="Alice Test")):
+        from connectors.bluebubbles import ingest_webhook_message
+        await ingest_webhook_message(GROUP_WEBHOOK_PAYLOAD)
+
+    kwargs = mock_graphiti.add_episode.call_args.kwargs
+    assert kwargs["body"].startswith("Alice Test: ")
+
+
+def test_is_group_chat_detection():
+    from connectors.bluebubbles import _is_group_chat
+    assert _is_group_chat("iMessage;+;chat123456789") is True
+    assert _is_group_chat("iMessage;-;+12345678900") is False
+    assert _is_group_chat("iMessage;-;user@example.com") is False

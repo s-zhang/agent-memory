@@ -3,6 +3,10 @@ BlueBubbles connector.
 Webhook-driven: BlueBubbles pushes new-message events to the ingestion service.
 Pull-based polling is disabled by default (BLUEBUBBLES_PULL_ENABLED=false) because
 Railway cannot reach the local Mac running BlueBubbles.
+
+Group chat detection: BlueBubbles encodes chat type in the GUID.
+  - DM:    iMessage;-;+12345678900  (semicolon-minus-semicolon)
+  - Group: iMessage;+;chat123456789 (semicolon-plus-semicolon)
 """
 import logging
 from datetime import datetime
@@ -40,7 +44,25 @@ async def _get_messages(chat_guid: str, limit: int = 50) -> list[dict]:
         return r.json().get("data", [])
 
 
-async def _ingest_message(msg: dict, chat_guid: str) -> None:
+def _is_group_chat(chat_guid: str) -> bool:
+    """BlueBubbles group chat GUIDs contain ';+;', DM GUIDs contain ';-;'."""
+    return ";+;" in chat_guid
+
+
+async def _resolve_participants(chat: dict) -> list[str]:
+    """Resolve participant handle addresses to display names."""
+    raw = chat.get("participants", []) or []
+    names: list[str] = []
+    for p in raw:
+        # Participants may be bare handle objects (address at top level)
+        # or wrapped under a "handle" key — check both.
+        addr = p.get("address", "") or (p.get("handle") or {}).get("address", "")
+        if addr:
+            names.append(await resolve_name(addr))
+    return names
+
+
+async def _ingest_message(msg: dict, chat_guid: str, chat: dict | None = None) -> None:
     msg_id = msg.get("guid", "")
     text = msg.get("text", "") or ""
     if not text.strip():
@@ -74,11 +96,31 @@ async def _ingest_message(msg: dict, chat_guid: str) -> None:
     # Use chat GUID as session/episode name — strip chars that break URL routing (;, :, +).
     session_id = f"imessage_{chat_guid.replace(':', '_').replace('+', '').replace(';', '_')}"
 
+    # Build group chat context for richer episode descriptions and metadata.
+    chat = chat or {}
+    is_group = _is_group_chat(chat_guid)
+    chat_name = chat.get("displayName", "") or ""
+    participants: list[str] = []
+
+    if is_group:
+        participants = await _resolve_participants(chat)
+        group_label = chat_name if chat_name else chat_guid
+        participants_str = ", ".join(participants) if participants else "unknown participants"
+        source_description = (
+            f"iMessage group chat '{group_label}' with participants: {participants_str}"
+        )
+        logger.debug(
+            "BlueBubbles group chat (guid=%s name=%r participants=%s)",
+            chat_guid, chat_name, participants,
+        )
+    else:
+        source_description = f"iMessage DM in chat {chat_guid}"
+
     await graphiti_writer.add_episode(
         name=session_id,
         body=f"{sender}: {text}",
         source="imessage",
-        source_description=f"iMessage conversation in chat {chat_guid}",
+        source_description=source_description,
         reference_time=timestamp,
     )
     await qdrant_writer.upsert_document(
@@ -86,7 +128,14 @@ async def _ingest_message(msg: dict, chat_guid: str) -> None:
         source_id=msg_id,
         title=f"iMessage: {sender}",
         text=f"{sender}: {text}",
-        extra_metadata={"chat_guid": chat_guid, "contact": sender, "timestamp": timestamp.isoformat()},
+        extra_metadata={
+            "chat_guid": chat_guid,
+            "contact": sender,
+            "timestamp": timestamp.isoformat(),
+            "is_group_chat": is_group,
+            "chat_name": chat_name,
+            "participants": participants,
+        },
     )
     dedup.mark_ingested("imessage", msg_id, h)
 
@@ -109,7 +158,7 @@ async def pull_recent(messages_per_chat: int = 50) -> None:
         try:
             messages = await _get_messages(guid, limit=messages_per_chat)
             for msg in reversed(messages):  # oldest first for Zep ordering
-                await _ingest_message(msg, guid)
+                await _ingest_message(msg, guid, chat=chat)
         except Exception as e:
             logger.error("BlueBubbles: error ingesting chat %s: %s", guid, e)
 
@@ -119,4 +168,14 @@ async def ingest_webhook_message(payload: dict) -> None:
     msg = payload.get("data", {})
     chat = payload.get("chat", {}) or {}
     chat_guid = chat.get("guid") or msg.get("chats", [{}])[0].get("guid", "unknown")
-    await _ingest_message(msg, chat_guid)
+
+    # Log the full chat object the first time we see a group chat, so we can
+    # verify that participants/displayName are present in the webhook payload.
+    if _is_group_chat(chat_guid):
+        logger.info(
+            "BlueBubbles group chat webhook (guid=%s): chat=%s",
+            chat_guid,
+            chat,
+        )
+
+    await _ingest_message(msg, chat_guid, chat=chat)
