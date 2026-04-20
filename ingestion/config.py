@@ -25,11 +25,13 @@ BLUEBUBBLES_PULL_ENABLED = os.environ.get("BLUEBUBBLES_PULL_ENABLED", "false").l
 CONTACT_SERVER_URL = os.environ.get("CONTACT_SERVER_URL", "http://desktop1.tail3d8f4.ts.net:9876")
 CONTACT_SERVER_TOKEN = os.environ.get("CONTACT_SERVER_TOKEN", "")
 
-IMAP_HOST = os.environ["IMAP_HOST"]
+IMAP_HOST = os.environ.get("IMAP_HOST", "")
 IMAP_PORT = int(os.environ.get("IMAP_PORT", 993))
-IMAP_USER = os.environ["IMAP_USER"]
-IMAP_PASSWORD = os.environ["IMAP_PASSWORD"]
+IMAP_USER = os.environ.get("IMAP_USER", "")
+IMAP_PASSWORD = os.environ.get("IMAP_PASSWORD", "")
 IMAP_MAILBOX = os.environ.get("IMAP_MAILBOX", "INBOX")
+
+EMAIL_WEBHOOK_SECRET = os.environ.get("EMAIL_WEBHOOK_SECRET", "")
 
 NOTION_API_KEY = os.environ["NOTION_API_KEY"]
 NOTION_WEBHOOK_SECRET = os.environ.get("NOTION_WEBHOOK_SECRET", "")

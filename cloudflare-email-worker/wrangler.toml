@@ -1,0 +1,12 @@
+name = "agent-memory-email-ingest"
+main = "index.js"
+compatibility_date = "2024-09-23"
+
+# Set INGEST_URL to your Railway service webhook endpoint.
+# Set WEBHOOK_SECRET via: wrangler secret put WEBHOOK_SECRET
+[vars]
+INGEST_URL = "https://agent-memory-production-cf12.up.railway.app/webhooks/email"
+
+# Bind this worker to your Cloudflare Email Routing destination.
+# In the Cloudflare dashboard: Email → Email Routing → Routes
+# Add a catch-all or specific rule pointing to this worker.

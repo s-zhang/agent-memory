@@ -17,6 +17,7 @@ import mcp_server as mcp_module
 from connectors import bluebubbles, email_imap, notion
 from scheduler import create_scheduler
 from webhooks import bluebubbles as bb_webhook
+from webhooks import email_inbound as email_webhook
 from webhooks import notion as notion_webhook
 from writers import graphiti_writer, qdrant_writer
 from writers.qdrant_writer import ensure_collection
@@ -161,4 +162,12 @@ async def webhook_bluebubbles(request: Request, background_tasks: BackgroundTask
     await bb_webhook.verify_token(request)
     payload = await request.json()
     background_tasks.add_task(bb_webhook.handle, payload)
+    return Response(status_code=200)
+
+
+@app.post("/webhooks/email")
+async def webhook_email(request: Request, background_tasks: BackgroundTasks):
+    email_webhook.verify_secret(request)
+    raw_bytes = await request.body()
+    background_tasks.add_task(email_webhook.handle, raw_bytes)
     return Response(status_code=200)
